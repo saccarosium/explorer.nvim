@@ -234,7 +234,7 @@ function util.create_scratch_buf(options)
 
   if options.lines then
     vim.api.nvim_buf_set_lines(buf, 0, -1, true, options.lines)
-    vim.api.nvim_buf_set_option(buf, 'modified', false)
+    vim.api.nvim_set_option_value('modified', false, { buf = buf })
   end
 
   if options.mappings then
@@ -246,7 +246,7 @@ function util.create_scratch_buf(options)
   end
 
   for option, value in pairs(buffer_options) do
-    vim.api.nvim_buf_set_option(buf, option, value)
+    vim.api.nvim_set_option_value(option, value, { buf = buf })
   end
 
   return buf
@@ -276,7 +276,7 @@ function util.set_winhl(win, highlights)
     winhls[#winhls + 1] = source .. ':' .. target
   end
 
-  vim.api.nvim_win_set_option(win, 'winhl', table.concat(winhls, ','))
+  vim.api.nvim_set_option_value('winhl', table.concat(winhls, ','), { win = win })
 end
 
 function util.clear_extmarks(buf, ...)
@@ -729,15 +729,15 @@ function view.activate(options_param)
       target = original_window,
     }
 
-    vim.api.nvim_win_set_option(
-      view.float.origin,
+    vim.api.nvim_set_option_value(
       'winhl',
-      'FloatBorder:CarbonFloatBorder,Normal:CarbonFloat'
+      'FloatBorder:CarbonFloatBorder,Normal:CarbonFloat',
+      { win = view.float.origin }
     )
   else
     vim.api.nvim_win_set_buf(0, current_view:buffer())
   end
-  vim.api.nvim_buf_set_option(current_view:buffer(), 'filetype', 'carbon.explorer')
+  vim.api.nvim_set_option_value('filetype', 'carbon.explorer', { buf = current_view:buffer() })
 end
 
 function view.close_sidebar()
@@ -925,12 +925,12 @@ function view:render()
   local current_mode = string.lower(vim.api.nvim_get_mode().mode)
 
   vim.api.nvim_buf_clear_namespace(buf, constants.hl, 0, -1)
-  vim.api.nvim_buf_set_option(buf, 'modifiable', true)
+  vim.api.nvim_set_option_value('modifiable', true, { buf = buf })
   vim.api.nvim_buf_set_lines(buf, 0, -1, true, lines)
-  vim.api.nvim_buf_set_option(buf, 'modified', false)
+  vim.api.nvim_set_option_value('modifiable', false, { buf = buf })
 
   if not string.find(current_mode, 'i') then
-    vim.api.nvim_buf_set_option(buf, 'modifiable', false)
+    vim.api.nvim_set_option_value('modifiable', false, { buf = buf })
   end
 
   for _, hl in ipairs(hls) do
@@ -1348,7 +1348,7 @@ function view:create()
   vim.keymap.set('i', '<cr>', create_confirm(ctx), { buffer = 0 })
   vim.keymap.set('i', '<esc>', create_cancel(ctx), { buffer = 0 })
   vim.cmd.startinsert({ bang = true })
-  vim.api.nvim_buf_set_option(0, 'modifiable', true)
+  vim.api.nvim_set_option_value('modifiable', true, { buf = 0 })
   vim.api.nvim_buf_set_lines(0, ctx.edit_lnum, ctx.init_end_lnum, true, { ctx.edit_prefix })
   util.cursor(ctx.edit_lnum + 1, ctx.edit_col)
 end
