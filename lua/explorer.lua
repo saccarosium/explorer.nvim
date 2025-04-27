@@ -9,7 +9,6 @@ local constants = {
 
 local defaults = {
   sync_pwd = false,
-  compress = true,
   auto_open = true,
   keep_netrw = false,
   sync_on_cd = not vim.opt.autochdir:get(),
@@ -1163,19 +1162,6 @@ function view:lines(input_target, lines, depth)
     local is_empty = true
     local indicator = ''
     local path_suffix = ''
-
-    if settings.compress then
-      while
-        tmp.is_directory
-        and #self:entry_children(tmp) == 1
-        and self:get_path_attr(tmp.path, 'compressible')
-      do
-        watcher.register(tmp.path)
-
-        path[#path + 1] = tmp
-        tmp = self:entry_children(tmp)[1]
-      end
-    end
 
     if tmp.is_directory then
       watcher.register(tmp.path)
