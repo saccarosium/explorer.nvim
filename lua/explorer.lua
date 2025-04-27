@@ -8,13 +8,7 @@ local constants = {
 -------------------------------------------------------------------------------
 
 local defaults = {
-  sync_pwd = false,
-  auto_open = true,
   keep_netrw = false,
-  sync_on_cd = not vim.opt.autochdir:get(),
-  sync_delay = 20,
-  open_on_dir = true,
-  auto_reveal = false,
   sidebar_width = 30,
   sidebar_toggle_focus = true,
   sidebar_position = 'left',
@@ -680,7 +674,7 @@ function view.activate(options_param)
     or view.current()
     or view.get(vim.loop.cwd())
 
-  if options.reveal or settings.auto_reveal then
+  if options.reveal then
     current_view:expand_to_path(vim.fn.expand('%'))
   end
 
@@ -809,7 +803,7 @@ function view.resync(path)
 
     view.resync_timer = nil
     view.resync_paths = {}
-  end, settings.sync_delay)
+  end, 20)
 end
 
 function view:expand_to_path(path)
@@ -1101,10 +1095,6 @@ function view:set_root(target, options_param)
       function(current_view) return vim.startswith(path, current_view.root.path) end
     )
   end)
-
-  if settings.sync_pwd and is_cwd then
-    vim.api.nvim_set_current_dir(self.root.path)
-  end
 
   return true
 end
@@ -1503,14 +1493,8 @@ function explorer.setup(user_settings)
 
     util.autocmd('SessionLoadPost', explorer.session_load_post, { pattern = '*' })
     util.autocmd('WinResized', explorer.win_resized, { pattern = '*' })
-
-    if settings.open_on_dir then
-      util.autocmd('BufWinEnter', explorer.explore_buf_dir, { pattern = '*' })
-    end
-
-    if settings.sync_on_cd then
-      util.autocmd('DirChanged', explorer.cd, { pattern = 'global' })
-    end
+    util.autocmd('BufWinEnter', explorer.explore_buf_dir, { pattern = '*' })
+    util.autocmd('DirChanged', explorer.cd, { pattern = 'global' })
 
     if not settings.keep_netrw then
       vim.g.loaded_netrw = 1
@@ -1535,7 +1519,7 @@ function explorer.setup(user_settings)
       end
     end
 
-    if vim.fn.has('vim_starting') and settings.auto_open and util.is_directory(open) then
+    if vim.fn.has('vim_starting') and util.is_directory(open) then
       view.activate({ path = open })
     end
 
