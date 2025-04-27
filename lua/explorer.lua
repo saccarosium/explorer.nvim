@@ -12,7 +12,6 @@ local defaults = {
   compress = true,
   auto_open = true,
   keep_netrw = false,
-  file_icons = pcall(require, 'nvim-web-devicons'),
   sync_on_cd = not vim.opt.autochdir:get(),
   sync_delay = 20,
   open_on_dir = true,
@@ -643,16 +642,6 @@ function view.get_sorted_items()
   return active_views
 end
 
-function view.file_icons()
-  if settings.file_icons then
-    local ok, module = pcall(require, 'nvim-web-devicons')
-
-    if ok then
-      return module
-    end
-  end
-end
-
 function view.find(path)
   local resolved = util.resolve(path)
 
@@ -1146,7 +1135,6 @@ function view:lines(input_target, lines, depth)
   local target = input_target or self.root
   local expand_indicator = ' '
   local collapse_indicator = ' '
-  local file_icons = view.file_icons()
 
   if type(settings.indicators) == 'table' then
     expand_indicator = settings.indicators.expand or expand_indicator
@@ -1160,7 +1148,6 @@ function view:lines(input_target, lines, depth)
       entry = self.root,
       line = self.root.name .. '/',
       highlights = { { 'CarbonDir', 0, -1 } },
-      icon_width = 0,
       path = {},
     }
 
@@ -1207,27 +1194,10 @@ function view:lines(input_target, lines, depth)
       indent = indent .. '  '
     end
 
-    local icon = ''
-    local icon_highlight
-
-    if file_icons and settings.file_icons and not tmp.is_directory then
-      local info = {
-        file_icons.get_icon(
-          tmp.name .. path_suffix,
-          vim.fn.fnamemodify(tmp.name, ':e'),
-          { default = true }
-        ),
-      }
-
-      icon = info[1] or ' '
-      icon_highlight = info[2]
-    end
-
     local full_path = tmp.name .. path_suffix
     local indent_end = #indent
-    local icon_width = #icon ~= 0 and #icon + 1 or 0
     local indicator_width = #indicator ~= 0 and #indicator + 1 or 0
-    local path_start = indent_end + icon_width + indicator_width
+    local path_start = indent_end + indicator_width
     local dir_path = table.concat(vim.tbl_map(function(parent) return parent.name end, path), '/')
 
     if path[1] then
@@ -1236,10 +1206,6 @@ function view:lines(input_target, lines, depth)
 
     if indicator_width ~= 0 and not is_empty then
       hls[#hls + 1] = { 'CarbonIndicator', indent_end, indent_end + indicator_width }
-    end
-
-    if icon and icon_highlight then
-      hls[#hls + 1] = { icon_highlight, indent_end + indicator_width, path_start - 1 }
     end
 
     local entries = { unpack(path) }
@@ -1270,16 +1236,11 @@ function view:lines(input_target, lines, depth)
       line_prefix = line_prefix .. indicator .. ' '
     end
 
-    if icon_width ~= 0 then
-      line_prefix = line_prefix .. icon .. ' '
-    end
-
     lines[#lines + 1] = {
       lnum = lnum,
       depth = depth,
       entry = tmp,
       line = line_prefix .. full_path,
-      icon_width = icon_width,
       highlights = hls,
       path = path,
     }
@@ -1363,7 +1324,7 @@ function view:delete()
   local target = targets[path_idx]
   local highlight = {
     'CarbonFile',
-    cursor.line.depth * 2 + 2 + cursor.line.icon_width,
+    cursor.line.depth * 2 + 2,
     lnum_idx,
   }
 
@@ -1431,7 +1392,7 @@ function view:move()
     return
   end
 
-  local path_start = target_line.depth * 2 + 2 + target_line.icon_width
+  local path_start = target_line.depth * 2 + 2
   local lnum_idx = target_line.lnum - 1
   local target_idx = util.tbl_key(targets, ctx.target)
   local clamped_names = { unpack(target_names, 1, target_idx - 1) }
