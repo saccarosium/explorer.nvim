@@ -35,22 +35,6 @@ local defaults = {
     delay = 50,
     duration = 500,
   },
-  float_settings = function()
-    local columns = vim.opt.columns:get()
-    local rows = vim.opt.lines:get()
-    local width = math.min(80, math.floor(columns * 0.9))
-    local height = math.min(40, math.floor(rows * 0.9))
-
-    return {
-      relative = 'editor',
-      style = 'minimal',
-      border = 'rounded',
-      width = width,
-      height = height,
-      col = math.floor(columns / 2 - width / 2),
-      row = math.floor(rows / 2 - height / 2 - 2),
-    }
-  end,
   actions = {
     up = '[',
     down = ']',
@@ -74,8 +58,6 @@ local defaults = {
     CarbonSymlink = { link = '@include' },
     CarbonBrokenSymlink = { link = 'DiagnosticError' },
     CarbonIndicator = { fg = 'Gray', ctermfg = 'DarkGray', bold = true },
-    CarbonFloat = { bg = '#111111', ctermbg = 'black' },
-    CarbonFloatBorder = { link = 'CarbonFloat' },
     CarbonDanger = { link = 'Error' },
     CarbonPending = { link = 'Search' },
     CarbonFlash = { link = 'Visual' },
@@ -567,7 +549,6 @@ local view = {}
 
 view.__index = view
 view.sidebar = { origin = -1, target = -1 }
-view.float = { origin = -1, target = -1 }
 view.items = {}
 view.resync_paths = {}
 view.last_index = 0
@@ -700,22 +681,6 @@ function view.activate(options_param)
 
     vim.api.nvim_win_set_width(view.sidebar.origin, settings.sidebar_width)
     vim.api.nvim_win_set_buf(view.sidebar.origin, current_view:buffer())
-  elseif options.float then
-    local float_settings = settings.float_settings or settings.defaults.float_settings
-
-    float_settings = type(float_settings) == 'function' and float_settings()
-      or vim.deepcopy(float_settings)
-
-    view.float = {
-      origin = vim.api.nvim_open_win(current_view:buffer(), true, float_settings),
-      target = original_window,
-    }
-
-    vim.api.nvim_set_option_value(
-      'winhl',
-      'FloatBorder:CarbonFloatBorder,Normal:CarbonFloat',
-      { win = view.float.origin }
-    )
   else
     vim.api.nvim_win_set_buf(0, current_view:buffer())
   end
@@ -730,15 +695,7 @@ function view.close_sidebar()
   view.sidebar = { origin = -1, target = -1 }
 end
 
-function view.close_float()
-  if vim.api.nvim_win_is_valid(view.float.origin) then
-    vim.api.nvim_win_close(view.float.origin, true)
-  end
-
-  view.float = { origin = -1, target = -1 }
-end
-
-function view.handle_sidebar_or_float()
+function view.handle_sidebar()
   local current_window = vim.api.nvim_get_current_win()
 
   if current_window == view.sidebar.origin then
@@ -759,8 +716,6 @@ function view.handle_sidebar_or_float()
         vim.api.nvim_win_set_width(view.sidebar.origin, settings.sidebar_width)
       end
     end
-  elseif current_window == view.float.origin then
-    view.close_float()
   end
 end
 
@@ -1002,7 +957,6 @@ function view:hide() -- luacheck:ignore unused argument self
   vim.opt_local.fillchars = vim.opt_global.fillchars:get()
 
   view.sidebar = { origin = -1, target = -1 }
-  view.float = { origin = -1, target = -1 }
 end
 
 function view:show()
@@ -1488,9 +1442,7 @@ function explorer.setup(user_settings)
     util.command('Carbon', explorer.explore, command_opts)
     util.command('Rcarbon', explorer.explore_right, command_opts)
     util.command('Lcarbon', explorer.explore_left, command_opts)
-    util.command('Fcarbon', explorer.explore_float, command_opts)
     util.command('ToggleSidebarCarbon', explorer.toggle_sidebar, command_opts)
-
     util.autocmd('SessionLoadPost', explorer.session_load_post, { pattern = '*' })
     util.autocmd('WinResized', explorer.win_resized, { pattern = '*' })
     util.autocmd('BufWinEnter', explorer.explore_buf_dir, { pattern = '*' })
@@ -1596,7 +1548,7 @@ end
 
 function explorer.tabe()
   view.execute(function(ctx)
-    view.handle_sidebar_or_float()
+    view.handle_sidebar()
     vim.cmd.tabedit({
       vim.fn.fnameescape(ctx.cursor.line.entry.path),
       mods = { keepalt = #vim.fn.getreg('#') ~= 0 },
@@ -1613,7 +1565,7 @@ function explorer.edit()
       ctx.view:update()
       ctx.view:render()
     else
-      view.handle_sidebar_or_float()
+      view.handle_sidebar()
       vim.cmd.edit({
         vim.fn.fnameescape(ctx.cursor.line.entry.path),
         mods = { keepalt = #vim.fn.getreg('#') ~= 0 },
@@ -1629,7 +1581,7 @@ function explorer.split()
         vim.api.nvim_win_close(0, true)
       end
 
-      view.handle_sidebar_or_float()
+      view.handle_sidebar()
       vim.cmd.split(vim.fn.fnameescape(ctx.cursor.line.entry.path))
     end
   end)
@@ -1642,7 +1594,7 @@ function explorer.vsplit()
         vim.api.nvim_win_close(0, true)
       end
 
-      view.handle_sidebar_or_float()
+      view.handle_sidebar()
       vim.cmd.vsplit(vim.fn.fnameescape(ctx.cursor.line.entry.path))
     end
   end)
@@ -1736,13 +1688,6 @@ function explorer.explore_right(options_param)
   end
 
   explorer.explore_sidebar(vim.tbl_extend('force', options_param or {}, { sidebar = 'right' }))
-end
-
-function explorer.explore_float(options_param)
-  local options = options_param or {}
-  local path = util.explore_path(options.fargs and options.fargs[1] or '', view.current())
-
-  view.activate({ path = path, reveal = options.bang, float = true })
 end
 
 function explorer.explore_buf_dir(params)
