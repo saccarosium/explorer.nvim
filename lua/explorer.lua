@@ -233,7 +233,7 @@ function util.create_scratch_buf(options)
   end
 
   if options.lines then
-    vim.api.nvim_buf_set_lines(buf, 0, -1, 1, options.lines)
+    vim.api.nvim_buf_set_lines(buf, 0, -1, true, options.lines)
     vim.api.nvim_buf_set_option(buf, 'modified', false)
   end
 
@@ -621,7 +621,7 @@ local function create_insert_move(ctx)
       .. vim.trim(string.sub(util.get_line(vim.fn.line('.')), ctx.edit_col))
     local last_slash_col = vim.fn.strridx(text, '/') + 1
 
-    vim.api.nvim_buf_set_lines(0, ctx.edit_lnum, ctx.edit_lnum + 1, 1, { text })
+    vim.api.nvim_buf_set_lines(0, ctx.edit_lnum, ctx.edit_lnum + 1, true, { text })
     util.clear_extmarks(0, { ctx.edit_lnum, 0 }, { ctx.edit_lnum, -1 }, {})
     util.add_highlight(0, 'CarbonDir', ctx.edit_lnum, 0, last_slash_col)
     util.add_highlight(0, 'CarbonFile', ctx.edit_lnum, last_slash_col, -1)
@@ -725,7 +725,7 @@ function view.activate(options_param)
       or vim.deepcopy(float_settings)
 
     view.float = {
-      origin = vim.api.nvim_open_win(current_view:buffer(), 1, float_settings),
+      origin = vim.api.nvim_open_win(current_view:buffer(), true, float_settings),
       target = original_window,
     }
 
@@ -926,7 +926,7 @@ function view:render()
 
   vim.api.nvim_buf_clear_namespace(buf, constants.hl, 0, -1)
   vim.api.nvim_buf_set_option(buf, 'modifiable', true)
-  vim.api.nvim_buf_set_lines(buf, 0, -1, 1, lines)
+  vim.api.nvim_buf_set_lines(buf, 0, -1, true, lines)
   vim.api.nvim_buf_set_option(buf, 'modified', false)
 
   if not string.find(current_mode, 'i') then
@@ -1349,7 +1349,7 @@ function view:create()
   vim.keymap.set('i', '<esc>', create_cancel(ctx), { buffer = 0 })
   vim.cmd.startinsert({ bang = true })
   vim.api.nvim_buf_set_option(0, 'modifiable', true)
-  vim.api.nvim_buf_set_lines(0, ctx.edit_lnum, ctx.init_end_lnum, 1, { ctx.edit_prefix })
+  vim.api.nvim_buf_set_lines(0, ctx.edit_lnum, ctx.init_end_lnum, true, { ctx.edit_prefix })
   util.cursor(ctx.edit_lnum + 1, ctx.edit_col)
 end
 
@@ -1695,7 +1695,7 @@ function explorer.split()
   view.execute(function(ctx)
     if not ctx.cursor.line.entry.is_directory then
       if vim.w.carbon_fexplore_window then
-        vim.api.nvim_win_close(0, 1)
+        vim.api.nvim_win_close(0, true)
       end
 
       view.handle_sidebar_or_float()
@@ -1708,7 +1708,7 @@ function explorer.vsplit()
   view.execute(function(ctx)
     if not ctx.cursor.line.entry.is_directory then
       if vim.w.carbon_fexplore_window then
-        vim.api.nvim_win_close(0, 1)
+        vim.api.nvim_win_close(0, true)
       end
 
       view.handle_sidebar_or_float()
@@ -1770,7 +1770,7 @@ function explorer.toggle_sidebar(options)
   local current_win = vim.api.nvim_get_current_win()
 
   if vim.api.nvim_win_is_valid(view.sidebar.origin) then
-    vim.api.nvim_win_close(view.sidebar.origin, 1)
+    vim.api.nvim_win_close(view.sidebar.origin, true)
   else
     local explore_options =
       vim.tbl_extend('force', options or {}, { sidebar = settings.sidebar_position })
@@ -1827,7 +1827,7 @@ end
 
 function explorer.quit()
   if #vim.api.nvim_list_wins() > 1 then
-    vim.api.nvim_win_close(0, 1)
+    vim.api.nvim_win_close(0, true)
   elseif #vim.api.nvim_list_bufs() > 1 then
     pcall(vim.cmd.bprevious)
   end
@@ -1849,22 +1849,22 @@ function explorer.close_parent()
   view.execute(function(ctx)
     local count = 0
     local lines = { unpack(ctx.view:current_lines(), 2) }
-    local entry = ctx.cursor.line.entry
+    local entry_ = ctx.cursor.line.entry
     local line
 
     while count < vim.v.count1 do
       line = util.tbl_find(
         lines,
         function(current)
-          return current.entry == entry.parent or vim.tbl_contains(current.path, entry.parent)
+          return current.entry == entry_.parent or vim.tbl_contains(current.path, entry_.parent)
         end
       )
 
       if line then
         count = count + 1
-        entry = line.path[1] and line.path[1].parent or line.entry
+        entry_ = line.path[1] and line.path[1].parent or line.entry
 
-        ctx.view:set_path_attr(entry.path, 'open', false)
+        ctx.view:set_path_attr(entry_.path, 'open', false)
       else
         break
       end
@@ -1872,7 +1872,7 @@ function explorer.close_parent()
 
     line = util.tbl_find(
       lines,
-      function(current) return current.entry == entry or vim.tbl_contains(current.path, entry) end
+      function(current) return current.entry == entry_ or vim.tbl_contains(current.path, entry_) end
     )
 
     if line then
