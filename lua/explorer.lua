@@ -8,10 +8,8 @@ local constants = {
 -------------------------------------------------------------------------------
 
 local defaults = {
-  keep_netrw = false,
   sidebar_width = 30,
   sidebar_toggle_focus = true,
-  sidebar_position = 'left',
   exclude = {
     '~$',
     '#$',
@@ -30,10 +28,6 @@ local defaults = {
   indicators = {
     expand = '+',
     collapse = '-',
-  },
-  flash = {
-    delay = 50,
-    duration = 500,
   },
   actions = {
     up = '[',
@@ -877,19 +871,17 @@ function view:render()
   if cursor then
     util.cursor(cursor.lnum, cursor.col)
 
-    if settings.flash then
-      vim.defer_fn(
-        function()
-          self:focus_flash(
-            settings.flash.duration,
-            'CarbonFlash',
-            { cursor.lnum - 1, cursor.col - 1 },
-            { cursor.lnum - 1, -1 }
-          )
-        end,
-        settings.flash.delay
-      )
-    end
+    vim.defer_fn(
+      function()
+        self:focus_flash(
+          500,
+          'CarbonFlash',
+          { cursor.lnum - 1, cursor.col - 1 },
+          { cursor.lnum - 1, -1 }
+        )
+      end,
+      50
+    )
   end
 
   self.flash = nil
@@ -1448,18 +1440,17 @@ function explorer.setup(user_settings)
     util.autocmd('BufWinEnter', explorer.explore_buf_dir, { pattern = '*' })
     util.autocmd('DirChanged', explorer.cd, { pattern = 'global' })
 
-    if not settings.keep_netrw then
-      vim.g.loaded_netrw = 1
-      vim.g.loaded_netrwPlugin = 1
+    -- Remove Netrw
+    vim.g.loaded_netrw = 1
+    vim.g.loaded_netrwPlugin = 1
 
-      pcall(vim.api.nvim_del_augroup_by_name, 'FileExplorer')
-      pcall(vim.api.nvim_del_augroup_by_name, 'Network')
+    pcall(vim.api.nvim_del_augroup_by_name, 'FileExplorer')
+    pcall(vim.api.nvim_del_augroup_by_name, 'Network')
 
-      util.command('Explore', explorer.explore, command_opts)
-      util.command('Rexplore', explorer.explore_right, command_opts)
-      util.command('Lexplore', explorer.explore_left, command_opts)
-      util.command('ToggleSidebarExplore', explorer.toggle_sidebar, command_opts)
-    end
+    util.command('Explore', explorer.explore, command_opts)
+    util.command('Rexplore', explorer.explore_right, command_opts)
+    util.command('Lexplore', explorer.explore_left, command_opts)
+    util.command('ToggleSidebarExplore', explorer.toggle_sidebar, command_opts)
 
     for action in pairs(settings.defaults.actions) do
       vim.keymap.set('', util.plug(action), explorer[action])
@@ -1655,8 +1646,7 @@ function explorer.toggle_sidebar(options)
   if vim.api.nvim_win_is_valid(view.sidebar.origin) then
     vim.api.nvim_win_close(view.sidebar.origin, true)
   else
-    local explore_options =
-      vim.tbl_extend('force', options or {}, { sidebar = settings.sidebar_position })
+    local explore_options = vim.tbl_extend('force', options or {}, { sidebar = 'left' })
 
     explorer.explore_sidebar(explore_options)
 
@@ -1668,7 +1658,7 @@ end
 
 function explorer.explore_sidebar(options_param)
   local options = options_param or {}
-  local sidebar = options.sidebar or settings.sidebar_position
+  local sidebar = options.sidebar or 'left'
   local path = util.explore_path(options.fargs and options.fargs[1] or '', view.current())
 
   view.activate({ path = path, reveal = options.bang, sidebar = sidebar })
