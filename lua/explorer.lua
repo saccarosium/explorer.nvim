@@ -46,17 +46,7 @@ local Config = {
     toggle_hidden = '*',
     toggle_recursive = '!',
   },
-  highlights = {
-    CarbonDir = { link = 'Directory' },
-    CarbonFile = { link = 'Text' },
-    CarbonExe = { link = '@function.builtin' },
-    CarbonSymlink = { link = '@include' },
-    CarbonBrokenSymlink = { link = 'DiagnosticError' },
-    CarbonIndicator = { fg = 'Gray', ctermfg = 'DarkGray', bold = true },
-    CarbonDanger = { link = 'Error' },
-    CarbonPending = { link = 'Search' },
-    CarbonFlash = { link = 'Visual' },
-  },
+  highlights = {},
 }
 
 -------------------------------------------------------------------------------
@@ -143,33 +133,6 @@ function util.tbl_except(tbl, keys)
   return result
 end
 
-function util.autocmd(event, cmd_or_callback, opts)
-  return vim.api.nvim_create_autocmd(
-    event,
-    vim.tbl_extend('force', {
-      group = constants.augroup,
-      callback = cmd_or_callback,
-    }, opts or {})
-  )
-end
-
-function util.clear_autocmd(event, opts)
-  return vim.api.nvim_clear_autocmds(vim.tbl_extend('force', {
-    group = constants.augroup,
-    event = event,
-  }, opts or {}))
-end
-
-function util.command(lhs, rhs, options)
-  return vim.api.nvim_create_user_command(lhs, rhs, options or {})
-end
-
-function util.highlight(group, opts)
-  local merged = vim.tbl_extend('force', { default = true }, opts or {})
-
-  vim.api.nvim_set_hl(0, group, merged)
-end
-
 function util.bufwinid(buf)
   for _, win in ipairs(vim.api.nvim_list_wins()) do
     if vim.api.nvim_win_get_buf(win) == buf then
@@ -209,7 +172,13 @@ function util.create_scratch_buf(options)
   end
 
   if options.autocmds then
-    util.set_buf_autocmds(buf, options.autocmds)
+    for event, cb in pairs(options.autocmds) do
+      vim.api.nvim_create_autocmd(event, {
+        buffer = buf,
+        group = constants.augroup,
+        callback = cb,
+      })
+    end
   end
 
   for option, value in pairs(buffer_options) do
@@ -227,12 +196,6 @@ function util.set_buf_mappings(buf, mappings)
       mapping[3],
       vim.tbl_extend('force', mapping[4] or {}, { buffer = buf })
     )
-  end
-end
-
-function util.set_buf_autocmds(buf, autocmds)
-  for autocmd, rhs in pairs(autocmds) do
-    util.autocmd(autocmd, rhs, { buffer = buf })
   end
 end
 
@@ -552,7 +515,13 @@ local function create_leave(ctx)
   util.cursor(ctx.target_line.lnum, 1)
   vim.keymap.del('i', '<cr>', { buffer = 0 })
   vim.keymap.del('i', '<esc>', { buffer = 0 })
-  util.clear_autocmd('CursorMovedI', { buffer = 0 })
+
+  vim.api.nvim_clear_autocmds({
+    buffer = 0,
+    event = 'CursorMovedI',
+    augroup = constants.augroup,
+  })
+
   ctx.view:update()
   ctx.view:render()
 end
@@ -1226,7 +1195,14 @@ function view:create()
 
   self:update()
   self:render()
-  util.autocmd('CursorMovedI', create_insert_move(ctx), { buffer = 0 })
+
+  vim.api.nvim_create_autocmd('CursorMovedI', {
+    buffer = 0,
+    pattern = '*',
+    group = constants.augroup,
+    callback = create_insert_move(ctx),
+  })
+
   vim.keymap.set('i', '<cr>', create_confirm(ctx), { buffer = 0 })
   vim.keymap.set('i', '<esc>', create_cancel(ctx), { buffer = 0 })
   vim.cmd.startinsert({ bang = true })
@@ -1745,10 +1721,19 @@ do
     vim.keymap.set('', util.plug(action), explorer[action])
   end
 
-  if type(Config.highlights) == 'table' then
-    for group, properties in pairs(Config.highlights) do
-      util.highlight(group, properties)
-    end
+  for group, val in pairs({
+    CarbonDir = { link = 'Directory' },
+    CarbonFile = { link = 'Text' },
+    CarbonExe = { link = '@function.builtin' },
+    CarbonSymlink = { link = '@include' },
+    CarbonBrokenSymlink = { link = 'DiagnosticError' },
+    CarbonIndicator = { fg = 'Gray', ctermfg = 'DarkGray', bold = true },
+    CarbonDanger = { link = 'Error' },
+    CarbonPending = { link = 'Search' },
+    CarbonFlash = { link = 'Visual' },
+  }) do
+    val.default = true
+    vim.api.nvim_set_hl(0, group, val)
   end
 
   if vim.fn.has('vim_starting') and util.is_directory(open) then
