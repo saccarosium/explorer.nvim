@@ -7,7 +7,8 @@ local constants = {
 
 -------------------------------------------------------------------------------
 
-local defaults = {
+---@class explorer.Opts
+local Config = {
   sidebar_width = 30,
   sidebar_toggle_focus = true,
   exclude = {
@@ -58,8 +59,6 @@ local defaults = {
   },
 }
 
-local settings = vim.tbl_extend('force', vim.deepcopy(defaults), { defaults = defaults })
-
 -------------------------------------------------------------------------------
 
 local util = {}
@@ -89,8 +88,8 @@ function util.resolve(path)
 end
 
 function util.is_excluded(path)
-  if settings.exclude then
-    for _, pattern in ipairs(settings.exclude) do
+  if Config.exclude then
+    for _, pattern in ipairs(Config.exclude) do
       if string.find(path, pattern) then
         return true
       end
@@ -673,7 +672,7 @@ function view.activate(options_param)
       }
     end
 
-    vim.api.nvim_win_set_width(view.sidebar.origin, settings.sidebar_width)
+    vim.api.nvim_win_set_width(view.sidebar.origin, Config.sidebar_width)
     vim.api.nvim_win_set_buf(view.sidebar.origin, current_view:buffer())
   else
     vim.api.nvim_win_set_buf(0, current_view:buffer())
@@ -707,7 +706,7 @@ function view.handle_sidebar()
         vim.cmd.split({ mods = { vertical = true, split = split } })
 
         view.sidebar.target = vim.api.nvim_get_current_win()
-        vim.api.nvim_win_set_width(view.sidebar.origin, settings.sidebar_width)
+        vim.api.nvim_win_set_width(view.sidebar.origin, Config.sidebar_width)
       end
     end
   end
@@ -913,7 +912,7 @@ function view:buffer()
     { 'n', 'O', '<nop>' },
   }
 
-  for action, mapping in pairs(settings.actions or {}) do
+  for action, mapping in pairs(Config.actions or {}) do
     if type(mapping) == 'string' then
       mapping = { mapping }
     end
@@ -1071,9 +1070,9 @@ function view:lines(input_target, lines, depth)
   local expand_indicator = ' '
   local collapse_indicator = ' '
 
-  if type(settings.indicators) == 'table' then
-    expand_indicator = settings.indicators.expand or expand_indicator
-    collapse_indicator = settings.indicators.collapse or collapse_indicator
+  if type(Config.indicators) == 'table' then
+    expand_indicator = Config.indicators.expand or expand_indicator
+    collapse_indicator = Config.indicators.collapse or collapse_indicator
   end
 
   if not input_target and #lines == 0 then
@@ -1393,7 +1392,7 @@ function view:switch_to_existing_view(path)
   if destination_view then
     vim.api.nvim_win_set_buf(0, destination_view:buffer())
 
-    if settings.sync_pwd and self.root.path == vim.loop.cwd() then
+    if Config.sync_pwd and self.root.path == vim.loop.cwd() then
       vim.api.nvim_set_current_dir(destination_view.root.path)
     end
 
@@ -1405,68 +1404,59 @@ end
 
 local explorer = {}
 
-function explorer.setup(user_settings)
-  if type(user_settings) ~= 'table' then
-    user_settings = {}
+---@param opts explorer.Opts? When omitted or `nil`, retrieve the current
+---       configuration. Otherwise, a configuration table (see |pack.Opts|).
+---@return explorer.Opts? : Current pack config if {opts} is omitted.
+function explorer.config(opts)
+  vim.validate('opts', opts, 'table', true)
+
+  if not opts then
+    return vim.deepcopy(Config, true)
   end
 
-  if not vim.g.carbon_initialized then
-    if type(user_settings) == 'function' then
-      user_settings(settings)
-    elseif type(user_settings) == 'table' then
-      local next = vim.tbl_deep_extend('force', settings, user_settings)
+  Config = vim.tbl_extend('force', Config, opts)
+end
 
-      for setting, value in pairs(next) do
-        settings[setting] = value
-      end
+function explorer.setup()
+  local argv = vim.fn.argv()
+  local open = argv[1] and vim.fn.fnamemodify(argv[1], ':p') or vim.loop.cwd()
+  local command_opts = { bang = true, nargs = '?', complete = 'dir' }
+
+  watcher.on('carbon:synchronize', function(_, path) view.resync(path) end)
+
+  util.command('Carbon', explorer.explore, command_opts)
+  util.command('Rcarbon', explorer.explore_right, command_opts)
+  util.command('Lcarbon', explorer.explore_left, command_opts)
+  util.command('ToggleSidebarCarbon', explorer.toggle_sidebar, command_opts)
+  util.autocmd('SessionLoadPost', explorer.session_load_post, { pattern = '*' })
+  util.autocmd('WinResized', explorer.win_resized, { pattern = '*' })
+  util.autocmd('BufWinEnter', explorer.explore_buf_dir, { pattern = '*' })
+  util.autocmd('DirChanged', explorer.cd, { pattern = 'global' })
+
+  -- Remove Netrw
+  vim.g.loaded_netrw = 1
+  vim.g.loaded_netrwPlugin = 1
+
+  pcall(vim.api.nvim_del_augroup_by_name, 'FileExplorer')
+  pcall(vim.api.nvim_del_augroup_by_name, 'Network')
+
+  util.command('Explore', explorer.explore, command_opts)
+  util.command('Rexplore', explorer.explore_right, command_opts)
+  util.command('Lexplore', explorer.explore_left, command_opts)
+  util.command('ToggleSidebarExplore', explorer.toggle_sidebar, command_opts)
+
+  for action in pairs(Config.actions) do
+    vim.keymap.set('', util.plug(action), explorer[action])
+  end
+
+  if type(Config.highlights) == 'table' then
+    for group, properties in pairs(Config.highlights) do
+      util.highlight(group, properties)
     end
+  end
 
-    if type(user_settings.highlights) == 'table' then
-      settings.highlights = vim.tbl_extend('force', settings.highlights, user_settings.highlights)
-    end
-
-    local argv = vim.fn.argv()
-    local open = argv[1] and vim.fn.fnamemodify(argv[1], ':p') or vim.loop.cwd()
-    local command_opts = { bang = true, nargs = '?', complete = 'dir' }
-
-    watcher.on('carbon:synchronize', function(_, path) view.resync(path) end)
-
-    util.command('Carbon', explorer.explore, command_opts)
-    util.command('Rcarbon', explorer.explore_right, command_opts)
-    util.command('Lcarbon', explorer.explore_left, command_opts)
-    util.command('ToggleSidebarCarbon', explorer.toggle_sidebar, command_opts)
-    util.autocmd('SessionLoadPost', explorer.session_load_post, { pattern = '*' })
-    util.autocmd('WinResized', explorer.win_resized, { pattern = '*' })
-    util.autocmd('BufWinEnter', explorer.explore_buf_dir, { pattern = '*' })
-    util.autocmd('DirChanged', explorer.cd, { pattern = 'global' })
-
-    -- Remove Netrw
-    vim.g.loaded_netrw = 1
-    vim.g.loaded_netrwPlugin = 1
-
-    pcall(vim.api.nvim_del_augroup_by_name, 'FileExplorer')
-    pcall(vim.api.nvim_del_augroup_by_name, 'Network')
-
-    util.command('Explore', explorer.explore, command_opts)
-    util.command('Rexplore', explorer.explore_right, command_opts)
-    util.command('Lexplore', explorer.explore_left, command_opts)
-    util.command('ToggleSidebarExplore', explorer.toggle_sidebar, command_opts)
-
-    for action in pairs(settings.defaults.actions) do
-      vim.keymap.set('', util.plug(action), explorer[action])
-    end
-
-    if type(settings.highlights) == 'table' then
-      for group, properties in pairs(settings.highlights) do
-        util.highlight(group, properties)
-      end
-    end
-
-    if vim.fn.has('vim_starting') and util.is_directory(open) then
-      view.activate({ path = open })
-    end
-
-    vim.g.carbon_initialized = true
+  if vim.fn.has('vim_starting') and util.is_directory(open) then
+    view.activate({ path = open })
   end
 end
 
@@ -1474,8 +1464,8 @@ function explorer.win_resized()
   if vim.api.nvim_win_is_valid(view.sidebar.origin) then
     local window_width = vim.api.nvim_win_get_width(view.sidebar.origin)
 
-    if window_width ~= settings.sidebar_width then
-      vim.api.nvim_win_set_width(view.sidebar.origin, settings.sidebar_width)
+    if window_width ~= Config.sidebar_width then
+      vim.api.nvim_win_set_width(view.sidebar.origin, Config.sidebar_width)
     end
   end
 end
@@ -1484,7 +1474,7 @@ function explorer.session_load_post(event)
   if util.is_directory(event.file) then
     local window_id = util.bufwinid(event.buf)
     local window_width = vim.api.nvim_win_get_width(window_id)
-    local is_sidebar = window_width == settings.sidebar_width
+    local is_sidebar = window_width == Config.sidebar_width
 
     view.activate({ path = event.file })
     view.execute(function(ctx) ctx.view:show() end)
@@ -1650,7 +1640,7 @@ function explorer.toggle_sidebar(options)
 
     explorer.explore_sidebar(explore_options)
 
-    if not settings.sidebar_toggle_focus then
+    if not Config.sidebar_toggle_focus then
       vim.api.nvim_set_current_win(current_win)
     end
   end
