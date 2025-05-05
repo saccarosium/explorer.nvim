@@ -1417,49 +1417,6 @@ function explorer.config(opts)
   Config = vim.tbl_extend('force', Config, opts)
 end
 
-function explorer.setup()
-  local argv = vim.fn.argv()
-  local open = argv[1] and vim.fn.fnamemodify(argv[1], ':p') or vim.loop.cwd()
-  local command_opts = { bang = true, nargs = '?', complete = 'dir' }
-
-  watcher.on('carbon:synchronize', function(_, path) view.resync(path) end)
-
-  util.command('Carbon', explorer.explore, command_opts)
-  util.command('Rcarbon', explorer.explore_right, command_opts)
-  util.command('Lcarbon', explorer.explore_left, command_opts)
-  util.command('ToggleSidebarCarbon', explorer.toggle_sidebar, command_opts)
-  util.autocmd('SessionLoadPost', explorer.session_load_post, { pattern = '*' })
-  util.autocmd('WinResized', explorer.win_resized, { pattern = '*' })
-  util.autocmd('BufWinEnter', explorer.explore_buf_dir, { pattern = '*' })
-  util.autocmd('DirChanged', explorer.cd, { pattern = 'global' })
-
-  -- Remove Netrw
-  vim.g.loaded_netrw = 1
-  vim.g.loaded_netrwPlugin = 1
-
-  pcall(vim.api.nvim_del_augroup_by_name, 'FileExplorer')
-  pcall(vim.api.nvim_del_augroup_by_name, 'Network')
-
-  util.command('Explore', explorer.explore, command_opts)
-  util.command('Rexplore', explorer.explore_right, command_opts)
-  util.command('Lexplore', explorer.explore_left, command_opts)
-  util.command('ToggleSidebarExplore', explorer.toggle_sidebar, command_opts)
-
-  for action in pairs(Config.actions) do
-    vim.keymap.set('', util.plug(action), explorer[action])
-  end
-
-  if type(Config.highlights) == 'table' then
-    for group, properties in pairs(Config.highlights) do
-      util.highlight(group, properties)
-    end
-  end
-
-  if vim.fn.has('vim_starting') and util.is_directory(open) then
-    view.activate({ path = open })
-  end
-end
-
 function explorer.win_resized()
   if vim.api.nvim_win_is_valid(view.sidebar.origin) then
     local window_width = vim.api.nvim_win_get_width(view.sidebar.origin)
@@ -1738,6 +1695,65 @@ function explorer.close_parent()
     ctx.view:update()
     ctx.view:render()
   end)
+end
+
+do
+  local argv = vim.fn.argv()
+  local open = argv[1] and vim.fn.fnamemodify(argv[1], ':p') or vim.loop.cwd()
+
+  watcher.on('carbon:synchronize', function(_, path) view.resync(path) end)
+
+  for name, command in pairs({
+    ['Carbon'] = explorer.explore,
+    ['Rcarbon'] = explorer.explore_right,
+    ['Lcarbon'] = explorer.explore_left,
+    ['ToggleSidebarCarbon'] = explorer.toggle_sidebar,
+  }) do
+    vim.api.nvim_create_user_command(name, command, {
+      bang = true,
+      nargs = '?',
+      complete = 'dir',
+    })
+  end
+
+  for event, cb in pairs({
+    ['SessionLoadPost'] = explorer.session_load_post,
+    ['WinResized'] = explorer.win_resized,
+    ['BufWinEnter'] = explorer.explore_buf_dir,
+  }) do
+    vim.api.nvim_create_autocmd(event, {
+      pattern = '*',
+      group = constants.augroup,
+      callback = cb,
+    })
+  end
+
+  vim.api.nvim_create_autocmd('DirChanged', {
+    pattern = 'global',
+    group = constants.augroup,
+    callback = explorer.cd,
+  })
+
+  -- Remove Netrw
+  vim.g.loaded_netrw = 1
+  vim.g.loaded_netrwPlugin = 1
+
+  pcall(vim.api.nvim_del_augroup_by_name, 'FileExplorer')
+  pcall(vim.api.nvim_del_augroup_by_name, 'Network')
+
+  for action in pairs(Config.actions) do
+    vim.keymap.set('', util.plug(action), explorer[action])
+  end
+
+  if type(Config.highlights) == 'table' then
+    for group, properties in pairs(Config.highlights) do
+      util.highlight(group, properties)
+    end
+  end
+
+  if vim.fn.has('vim_starting') and util.is_directory(open) then
+    view.activate({ path = open })
+  end
 end
 
 return explorer
