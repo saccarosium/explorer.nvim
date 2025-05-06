@@ -1252,37 +1252,6 @@ function explorer.config(opts)
   Config = vim.tbl_extend('force', Config, opts)
 end
 
-function explorer.win_resized()
-  if vim.api.nvim_win_is_valid(view.sidebar.origin) then
-    local window_width = vim.api.nvim_win_get_width(view.sidebar.origin)
-
-    if window_width ~= Config.sidebar_width then
-      vim.api.nvim_win_set_width(view.sidebar.origin, Config.sidebar_width)
-    end
-  end
-end
-
-function explorer.session_load_post(event)
-  if is_directory(event.file) then
-    local window_id = buf_winid(event.buf)
-    local window_width = vim.api.nvim_win_get_width(window_id)
-    local is_sidebar = window_width == Config.sidebar_width
-
-    view.activate({ path = event.file })
-    view.execute(function(ctx) ctx.view:show() end)
-
-    if is_sidebar then
-      local neighbor = vim
-        .iter(win_neightbors(window_id, { 'left', 'right' }))
-        :find(function(neighbor) return neighbor.target end)
-
-      if neighbor then
-        view.sidebar = neighbor
-      end
-    end
-  end
-end
-
 function explorer.toggle_hidden()
   view.execute(function(ctx)
     ctx.view.show_hidden = not ctx.view.show_hidden
@@ -1402,18 +1371,6 @@ function explorer.down()
   end)
 end
 
-function explorer.cd(path)
-  view.execute(function(ctx)
-    local destination = path and path.file or path or vim.v.event.cwd
-
-    if ctx.view:cd(destination) then
-      ctx.view:update()
-      ctx.view:render()
-      set_cursor(1, 1)
-    end
-  end)
-end
-
 function explorer.explore(opts)
   opts = opts or {}
 
@@ -1462,17 +1419,6 @@ function explorer.explore_right(options_param)
   end
 
   explorer.explore_sidebar(vim.tbl_extend('force', options_param or {}, { sidebar = 'right' }))
-end
-
-function explorer.explore_buf_dir(params)
-  if vim.bo.filetype == 'carbon.explorer' then
-    return
-  end
-
-  if params and params.file and is_directory(params.file) then
-    view.activate({ path = params.file })
-    view.execute(function(ctx) ctx.view:show() end)
-  end
 end
 
 function explorer.quit()
@@ -1548,18 +1494,79 @@ do
     })
   end
 
-  for event, opts in pairs({
-    ['BufWinEnter'] = { '*', explorer.explore_buf_dir },
-    ['DirChanged'] = { 'global', explorer.cd },
-    ['SessionLoadPost'] = { '*', explorer.session_load_post },
-    ['WinResized'] = { '*', explorer.win_resized },
-  }) do
-    vim.api.nvim_create_autocmd(event, {
-      pattern = opts[1],
-      group = constants.augroup,
-      callback = opts[2],
-    })
-  end
+  vim.api.nvim_create_autocmd('BufWinEnter', {
+    pattern = '*',
+    group = constants.augroup,
+    callback = function(args)
+      if vim.bo.filetype == 'carbon.explorer' then
+        return
+      end
+
+      if args and args.file and is_directory(args.file) then
+        view.activate({ path = args.file })
+        view.execute(function(ctx) ctx.view:show() end)
+      end
+    end,
+  })
+
+  vim.api.nvim_create_autocmd('DirChanged', {
+    pattern = 'global',
+    group = constants.augroup,
+    callback = function(args)
+      view.execute(function(ctx)
+        local destination = args and args.file or vim.v.event.cwd
+
+        if ctx.view:cd(destination) then
+          ctx.view:update()
+          ctx.view:render()
+          set_cursor(1, 1)
+        end
+      end)
+    end,
+  })
+
+  vim.api.nvim_create_autocmd('WinResized', {
+    pattern = '*',
+    group = constants.augroup,
+    callback = function()
+      if not vim.api.nvim_win_is_valid(view.sidebar.origin) then
+        return
+      end
+
+      local window_width = vim.api.nvim_win_get_width(view.sidebar.origin)
+
+      if window_width ~= Config.sidebar_width then
+        vim.api.nvim_win_set_width(view.sidebar.origin, Config.sidebar_width)
+      end
+    end,
+  })
+
+  vim.api.nvim_create_autocmd('SessionLoadPost', {
+    pattern = '*',
+    group = constants.augroup,
+    callback = function(args)
+      if not is_directory(args.file) then
+        return
+      end
+
+      local window_id = buf_winid(args.buf)
+      local window_width = vim.api.nvim_win_get_width(window_id)
+      local is_sidebar = window_width == Config.sidebar_width
+
+      view.activate({ path = args.file })
+      view.execute(function(ctx) ctx.view:show() end)
+
+      if is_sidebar then
+        local neighbor = vim
+          .iter(win_neightbors(window_id, { 'left', 'right' }))
+          :find(function(neighbor) return neighbor.target end)
+
+        if neighbor then
+          view.sidebar = neighbor
+        end
+      end
+    end,
+  })
 
   for group, val in pairs({
     CarbonDir = { link = 'Directory' },
