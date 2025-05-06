@@ -1,3 +1,5 @@
+local explorer = {}
+
 local constants = {
   hl = vim.api.nvim_create_namespace('carbon'),
   hl_tmp = vim.api.nvim_create_namespace('carbon:tmp'),
@@ -11,21 +13,7 @@ local constants = {
 local Config = {
   sidebar_width = 30,
   sidebar_toggle_focus = true,
-  exclude = {
-    '~$',
-    '#$',
-    '%.git$',
-    '%.bak$',
-    '%.rbc$',
-    '%.class$',
-    '%.sw[a-p]$',
-    '%.py[cod]$',
-    '%.Trashes$',
-    '%.DS_Store$',
-    'Thumbs%.db$',
-    '__pycache__',
-    'node_modules',
-  },
+  exclude = {},
   indicators = {
     expand = '+',
     collapse = '-',
@@ -54,26 +42,6 @@ local function get_line(lnum, buffer)
   return vim.api.nvim_buf_get_lines(buffer or 0, lnum - 1, lnum, true)[1]
 end
 
-local function path_explore(path, current_view)
-  path = string.gsub(path, '%s', '')
-
-  if path == '' then
-    path = vim.uv.cwd()
-  end
-
-  if not vim.startswith(path, '/') then
-    local base_path = current_view and current_view.root.path or vim.loop.cwd()
-
-    path = string.format('%s/%s', base_path, path)
-  end
-
-  return string.gsub(vim.fn.simplify(path), '/+$', '')
-end
-
-local function path_resolve(path)
-  return vim.fn.fnamemodify(vim.fs.normalize(path), ':p'):gsub('/+$', '')
-end
-
 local function is_excluded(path)
   for _, pattern in ipairs(Config.exclude) do
     if string.find(path, pattern) then
@@ -96,36 +64,16 @@ local function tbl_key(tbl, item)
   end
 end
 
-local function tbl_some(tbl, callback)
-  for key, value in pairs(tbl) do
-    if callback(value, key) then
-      return true
-    end
-  end
-  return false
-end
-
-local function tbl_find(tbl, callback)
-  for key, value in pairs(tbl) do
-    if callback(value, key) then
-      return value, key
-    end
-  end
-end
-
-local function bufwinid(buf)
-  for _, win in ipairs(vim.api.nvim_list_wins()) do
-    if vim.api.nvim_win_get_buf(win) == buf then
-      return win
-    end
-  end
+local function buf_winid(buf)
+  return vim
+    .iter(vim.api.nvim_list_wins())
+    :find(function(win) return vim.api.nvim_win_get_buf(win) == buf end)
 end
 
 local function buf_find_by_name(name)
-  return tbl_find(
-    vim.api.nvim_list_bufs(),
-    function(bufnr) return name == vim.api.nvim_buf_get_name(bufnr) end
-  )
+  return vim
+    .iter(vim.api.nvim_list_bufs())
+    :find(function(buf) return name == vim.api.nvim_buf_get_name(buf) end)
 end
 
 local function buf_create(name)
@@ -212,7 +160,7 @@ end
 
 function watcher.register(path)
   if not watcher.listeners[path] then
-    watcher.listeners[path] = vim.loop.new_fs_event()
+    watcher.listeners[path] = vim.uv.new_fs_event()
 
     watcher.listeners[path]:start(
       path,
@@ -288,13 +236,13 @@ end
 function entry.new(path, parent)
   local raw_path = path == '' and '/' or path
   local clean = string.gsub(raw_path, '/+$', '')
-  local lstat = select(2, pcall(vim.loop.fs_lstat, raw_path)) or {}
+  local lstat = select(2, pcall(vim.uv.fs_lstat, raw_path)) or {}
   local is_exe = lstat.mode == 33261
   local is_dir = lstat.type == 'directory'
   local is_sym = lstat.type == 'link' and 1
 
   if is_sym then
-    local stat = select(2, pcall(vim.loop.fs_stat, raw_path))
+    local stat = select(2, pcall(vim.uv.fs_stat, raw_path))
 
     if stat then
       is_exe = lstat.mode == 33261
@@ -409,13 +357,13 @@ function entry:set_children(children) entry.items[self.path] = children end
 
 function entry:get_children()
   local entries = {}
-  local handle = vim.loop.fs_scandir(self.raw_path)
+  local handle = vim.uv.fs_scandir(self.raw_path)
 
   if type(handle) == 'userdata' then
-    local function iterator() return vim.loop.fs_scandir_next(handle) end
+    local function iterator() return vim.uv.fs_scandir_next(handle) end
 
     for name in iterator do
-      entries[#entries + 1] = entry.new(self.path .. '/' .. name, self)
+      table.insert(entries, entry.new(vim.fs.joinpath(self.path, name), self))
     end
 
     table.sort(entries)
@@ -469,12 +417,12 @@ local function create_confirm(ctx)
   return function()
     local text = vim.trim(string.sub(get_line(vim.fn.line('.')), ctx.edit_col))
     local name = vim.fn.fnamemodify(text, ':t')
-    local parent_directory = ctx.target.path .. '/' .. vim.trim(vim.fn.fnamemodify(text, ':h'))
+    local parent_directory = vim.fs.joinpath(ctx.target.path, vim.fs.dirname(text))
 
     vim.fn.mkdir(parent_directory, 'p')
 
     if name ~= '' then
-      vim.fn.writefile({}, parent_directory .. '/' .. name)
+      vim.fn.writefile({}, vim.fs.joinpath(parent_directory, name))
     end
 
     create_leave(ctx)
@@ -517,9 +465,11 @@ function view.get_sorted_items()
 end
 
 function view.find(path)
-  local resolved = path_resolve(path)
+  local resolved = vim.fs.normalize(path)
 
-  return tbl_find(view.items, function(target_view) return target_view.root.path == resolved end)
+  return vim
+    .iter(view.items)
+    :find(function(target_view) return target_view.root.path == resolved end)
 end
 
 function view.get(path)
@@ -531,7 +481,7 @@ function view.get(path)
 
   view.last_index = view.last_index + 1
 
-  local resolved = path_resolve(path)
+  local resolved = vim.fs.normalize(path)
   local instance = setmetatable({
     index = view.last_index,
     initial = resolved,
@@ -550,7 +500,7 @@ function view.activate(options_param)
   local original_window = vim.api.nvim_get_current_win()
   local current_view = (options.path and view.get(options.path))
     or view.current()
-    or view.get(vim.loop.cwd())
+    or view.get(vim.uv.cwd())
 
   current_view:expand_to_path(vim.fn.expand('%'))
 
@@ -657,7 +607,7 @@ function view.resync(path)
 end
 
 function view:expand_to_path(path)
-  local resolved = path_resolve(path)
+  local resolved = vim.fs.normalize(path)
 
   if vim.startswith(resolved, self.root.path) then
     local dirs = vim.split(string.sub(resolved, #self.root.path + 2), '/')
@@ -766,7 +716,7 @@ function view:render()
   end
 
   for _, hl in ipairs(hls) do
-    vim.api.nvim_buf_add_highlight(buf, constants.hl, hl[1], hl[2], hl[3], hl[4])
+    add_highlight(buf, hl[1], hl[2], hl[3], hl[4])
   end
 
   if cursor then
@@ -816,6 +766,7 @@ function view:buffer()
 
     if type(mapping) == 'table' then
       for _, key in ipairs(mapping) do
+        vim.keymap.set('', plug(action), explorer[action], { buffer = buf, nowait = true })
         vim.keymap.set('n', key, plug(action), { buffer = buf, nowait = true })
       end
     end
@@ -932,10 +883,12 @@ function view:set_root(target, opts)
   vim.api.nvim_buf_set_var(self:buffer(), 'carbon', { index = self.index, path = self.root.path })
 
   watcher.keep(function(path)
-    return tbl_some(
-      view.items,
-      function(current_view) return vim.startswith(path, current_view.root.path) end
-    )
+    for _, v in ipairs(view.items) do
+      if vim.startswith(path, v.root.path) then
+        return true
+      end
+    end
+    return false
   end)
 
   return true
@@ -1019,7 +972,7 @@ function view:lines(input_target, lines, depth)
     local dir_path = table.concat(vim.tbl_map(function(parent) return parent.name end, path), '/')
 
     if path[1] then
-      full_path = dir_path .. '/' .. full_path
+      full_path = vim.fs.joinpath(dir_path, full_path)
     end
 
     if indicator_width ~= 0 and not is_empty then
@@ -1083,12 +1036,12 @@ function view:cursor(opts)
   end
 
   target = line.path[vim.v.count] or target
-  target_line = tbl_find(lines, function(current)
+  target_line = vim.iter(lines):find(function(current)
     if current.entry.path == target.path then
       return true
     end
 
-    return tbl_find(current.path, function(parent)
+    return vim.iter(current.path):find(function(parent)
       if parent.path == target.path then
         return true
       end
@@ -1169,41 +1122,27 @@ function view:delete()
 
   vim.cmd.redraw()
 
-  local paths = table.concat(
-    vim.tbl_map(
-      function(path) return string.format('=> %s', vim.fn.fnamemodify(path, ':.')) end,
-      { target.path }
-    ),
-    '\n'
-  )
+  vim.ui.input({ prompt = 'Confirm deletion of specified path [Y/n]? ' }, function(input)
+    if input ~= '' and vim.fn.tolower(input) ~= 'y' then
+      extmarks_clear(0, { lnum_idx, 0 }, { lnum_idx, -1 }, {})
+      for _, lhl in ipairs(cursor.line.highlights) do
+        add_highlight(0, lhl[1], lnum_idx, lhl[2], lhl[3])
+      end
+      self:render()
+      return
+    end
 
-  local answer = vim.fn.confirm(
-    string.format('Confirm deletion of specified paths:\n%s\n', paths),
-    '&Delete\n&Cancel',
-    2,
-    'Error'
-  )
-
-  if answer == 1 then
     local result = vim.fn.delete(target.path, target.is_directory and 'rf' or '')
-
     if result == -1 then
-      vim.api.nvim_echo({
-        { 'Failed to delete: ', 'CarbonDanger' },
-        { vim.fn.fnamemodify(target.path, ':.'), 'CarbonIndicator' },
-      }, false, {})
-    else
-      view.resync(vim.fn.fnamemodify(target.path, ':h'))
-    end
-  else
-    extmarks_clear(0, { lnum_idx, 0 }, { lnum_idx, -1 }, {})
-
-    for _, lhl in ipairs(cursor.line.highlights) do
-      add_highlight(0, lhl[1], lnum_idx, lhl[2], lhl[3])
+      vim.notify(
+        ('Failed to delete: %q'):format(vim.fn.fnamemodify(target.path, ':.')),
+        vim.log.levels.ERROR
+      )
+      return
     end
 
-    self:render()
-  end
+    view.resync(vim.fn.fnamemodify(target.path, ':h'))
+  end)
 end
 
 function view:move()
@@ -1229,46 +1168,41 @@ function view:move()
   extmarks_clear(0, { lnum_idx, start_hl }, { lnum_idx, -1 }, {})
   add_highlight(0, 'CarbonPending', lnum_idx, start_hl, -1)
   vim.cmd.redraw({ bang = true })
-  vim.cmd.echohl('CarbonPending')
 
-  local updated_path = string.gsub(
-    vim.fn.input({
-      prompt = 'destination: ',
-      default = ctx.target.path,
-      cancelreturn = ctx.target.path,
-    }),
-    '/+$',
-    ''
-  )
-
-  vim.cmd.echohl('None')
-  vim.api.nvim_echo({ { ' ' } }, false, {})
-
-  if updated_path == ctx.target.path then
-    self:render()
-  elseif vim.loop.fs_stat(updated_path) then
-    self:render()
-    vim.api.nvim_echo({
-      { 'Failed to move: ', 'CarbonDanger' },
-      { vim.fn.fnamemodify(ctx.target.path, ':.'), 'CarbonIndicator' },
-      { ' => ' },
-      { vim.fn.fnamemodify(updated_path, ':.'), 'CarbonIndicator' },
-      { ' (destination exists)', 'CarbonPending' },
-    }, false, {})
-  else
-    local directory = vim.fn.fnamemodify(updated_path, ':h')
-    local tmp_path = ctx.target.path
-
-    if vim.startswith(updated_path, tmp_path) then
-      tmp_path = vim.fn.tempname()
-
-      vim.fn.rename(ctx.target.path, tmp_path)
+  vim.ui.input({
+    prompt = 'destination: ',
+    default = ctx.target.path,
+    complete = 'file',
+  }, function(input)
+    if vim.fn.empty(input) == 1 then
+      self:render()
+      return
     end
 
-    vim.fn.mkdir(directory, 'p')
-    vim.fn.rename(tmp_path, updated_path)
-    view.resync(vim.fn.fnamemodify(ctx.target.path, ':h'))
-  end
+    if vim.uv.fs_stat(input) then
+      self:render()
+      vim.notify(
+        ('Failed to move: %q => %q (destination exists)'):format(
+          vim.fn.fnamemodify(ctx.target.path, ':.'),
+          vim.fn.fnamemodify(input, ':.')
+        ),
+        vim.log.levels.ERROR
+      )
+      return
+    end
+
+    local dirname = vim.fs.dirname(input)
+    local tmp_path = ctx.target.path
+
+    if vim.startswith(input, tmp_path) then
+      tmp_path = vim.fn.tempname()
+      vim.uv.fs_rename(ctx.target.path, tmp_path)
+    end
+
+    vim.fn.mkdir(dirname, 'p')
+    vim.uv.fs_rename(tmp_path, input)
+    view.resync(vim.fs.dirname(ctx.target.path))
+  end)
 end
 
 function view:parents(count)
@@ -1277,7 +1211,7 @@ function view:parents(count)
 
   if path ~= '' then
     for _ = count or vim.v.count1, 1, -1 do
-      path = vim.fn.fnamemodify(path, ':h')
+      path = vim.fs.dirname(path)
       parents[#parents + 1] = entry.new(path)
 
       if path == '/' then
@@ -1295,7 +1229,7 @@ function view:switch_to_existing_view(path)
   if destination_view then
     vim.api.nvim_win_set_buf(0, destination_view:buffer())
 
-    if Config.sync_pwd and self.root.path == vim.loop.cwd() then
+    if self.root.path == vim.uv.cwd() then
       vim.api.nvim_set_current_dir(destination_view.root.path)
     end
 
@@ -1304,8 +1238,6 @@ function view:switch_to_existing_view(path)
 end
 
 -------------------------------------------------------------------------------
-
-local explorer = {}
 
 ---@param opts explorer.Opts? When omitted or `nil`, retrieve the current
 ---       configuration. Otherwise, a configuration table (see |pack.Opts|).
@@ -1332,7 +1264,7 @@ end
 
 function explorer.session_load_post(event)
   if is_directory(event.file) then
-    local window_id = bufwinid(event.buf)
+    local window_id = buf_winid(event.buf)
     local window_width = vim.api.nvim_win_get_width(window_id)
     local is_sidebar = window_width == Config.sidebar_width
 
@@ -1340,10 +1272,9 @@ function explorer.session_load_post(event)
     view.execute(function(ctx) ctx.view:show() end)
 
     if is_sidebar then
-      local neighbor = tbl_find(
-        win_neightbors(window_id, { 'left', 'right' }),
-        function(neighbor) return neighbor.target end
-      )
+      local neighbor = vim
+        .iter(win_neightbors(window_id, { 'left', 'right' }))
+        :find(function(neighbor) return neighbor.target end)
 
       if neighbor then
         view.sidebar = neighbor
@@ -1483,11 +1414,13 @@ function explorer.cd(path)
   end)
 end
 
-function explorer.explore(options_param)
-  local options = options_param or {}
-  local path = path_explore(options.fargs and options.fargs[1] or '', view.current())
+function explorer.explore(opts)
+  opts = opts or {}
 
-  view.activate({ path = path, reveal = options.bang })
+  local path = opts.fargs and opts.fargs[1] or vim.uv.cwd() --[[@as string]]
+  path = vim.fs.normalize(path)
+
+  view.activate({ path = path, reveal = opts.bang })
 end
 
 function explorer.toggle_sidebar(options)
@@ -1506,12 +1439,13 @@ function explorer.toggle_sidebar(options)
   end
 end
 
-function explorer.explore_sidebar(options_param)
-  local options = options_param or {}
-  local sidebar = options.sidebar or 'left'
-  local path = path_explore(options.fargs and options.fargs[1] or '', view.current())
+function explorer.explore_sidebar(opts)
+  opts = opts or {}
+  local sidebar = opts.sidebar or 'left'
+  local path = opts.fargs and opts.fargs[1] or vim.uv.cwd() --[[@as string]]
+  path = vim.fs.normalize(path)
 
-  view.activate({ path = path, reveal = options.bang, sidebar = sidebar })
+  view.activate({ path = path, reveal = opts.bang, sidebar = sidebar })
 end
 
 function explorer.explore_left(options_param)
@@ -1569,8 +1503,7 @@ function explorer.close_parent()
     local line
 
     while count < vim.v.count1 do
-      line = tbl_find(
-        lines,
+      line = vim.iter(lines):find(
         function(current)
           return current.entry == entry_.parent or vim.tbl_contains(current.path, entry_.parent)
         end
@@ -1586,8 +1519,7 @@ function explorer.close_parent()
       end
     end
 
-    line = tbl_find(
-      lines,
+    line = vim.iter(lines):find(
       function(current) return current.entry == entry_ or vim.tbl_contains(current.path, entry_) end
     )
 
