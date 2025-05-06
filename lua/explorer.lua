@@ -9,8 +9,8 @@ local constants = {
 
 ---@class explorer.Opts
 local Config = {
-  sidebar_width = 30,
-  sidebar_toggle_focus = true,
+  width = 30,
+  toggle = true,
   exclude = {},
   indicators = {
     expand = '+',
@@ -679,7 +679,7 @@ function view.activate(options_param)
       }
     end
 
-    vim.api.nvim_win_set_width(view.sidebar.origin, Config.sidebar_width)
+    vim.api.nvim_win_set_width(view.sidebar.origin, Config.width)
     vim.api.nvim_win_set_buf(view.sidebar.origin, current_view:buffer())
   else
     vim.api.nvim_win_set_buf(0, current_view:buffer())
@@ -713,7 +713,7 @@ function view.handle_sidebar()
         vim.cmd.split({ mods = { vertical = true, split = split } })
 
         view.sidebar.target = vim.api.nvim_get_current_win()
-        vim.api.nvim_win_set_width(view.sidebar.origin, Config.sidebar_width)
+        vim.api.nvim_win_set_width(view.sidebar.origin, Config.width)
       end
     end
   end
@@ -1397,13 +1397,20 @@ function M.config(opts)
   Config = vim.tbl_extend('force', Config, opts)
 end
 
-local function explore_sidebar(opts)
-  opts = opts or {}
-  local sidebar = opts.sidebar or 'left'
-  local path = opts.fargs and opts.fargs[1] or vim.uv.cwd() --[[@as string]]
-  path = vim.fs.normalize(path)
+--- @param direction "left" | "right"
+--- @param path string?
+local function drawer_open(direction, path)
+  if Config.toggle and view.sidebar.position == direction then
+    view.close_sidebar()
+    return
+  end
 
-  view.activate({ path = path, reveal = opts.bang, sidebar = sidebar })
+  if view.sidebar.position ~= direction then
+    view.close_sidebar()
+  end
+
+  path = vim.fs.normalize(path or vim.uv.cwd() --[[@as string]])
+  view.activate({ path = path, sidebar = direction })
 end
 
 do
@@ -1418,35 +1425,17 @@ do
     view.activate({ path = path, reveal = opts.bang })
   end, { bang = true, nargs = '?', complete = 'dir' })
 
-  vim.api.nvim_create_user_command('Lcarbon', function(opts)
-    if view.sidebar.position ~= 'left' then
-      view.close_sidebar()
-    end
-    explore_sidebar(vim.tbl_extend('force', opts or {}, { sidebar = 'left' }))
-  end, { bang = true, nargs = '?', complete = 'dir' })
+  vim.api.nvim_create_user_command(
+    'Lcarbon',
+    function(opts) drawer_open('left', opts.fargs and opts.fargs[1] or nil) end,
+    { bang = true, nargs = '?', complete = 'dir' }
+  )
 
-  vim.api.nvim_create_user_command('Rcarbon', function(opts)
-    if view.sidebar.position ~= 'right' then
-      view.close_sidebar()
-    end
-    explore_sidebar(vim.tbl_extend('force', opts or {}, { sidebar = 'right' }))
-  end, { bang = true, nargs = '?', complete = 'dir' })
-
-  vim.api.nvim_create_user_command('ToggleSidebarCarbon', function(opts)
-    local current_win = vim.api.nvim_get_current_win()
-
-    if vim.api.nvim_win_is_valid(view.sidebar.origin) then
-      vim.api.nvim_win_close(view.sidebar.origin, true)
-    else
-      local explore_options = vim.tbl_extend('force', opts or {}, { sidebar = 'left' })
-
-      explore_sidebar(explore_options)
-
-      if not Config.sidebar_toggle_focus then
-        vim.api.nvim_set_current_win(current_win)
-      end
-    end
-  end, { bang = true, nargs = '?', complete = 'dir' })
+  vim.api.nvim_create_user_command(
+    'Rcarbon',
+    function(opts) drawer_open('right', opts.fargs and opts.fargs[1] or nil) end,
+    { bang = true, nargs = '?', complete = 'dir' }
+  )
 
   vim.api.nvim_create_autocmd('BufWinEnter', {
     pattern = '*',
@@ -1489,8 +1478,8 @@ do
 
       local window_width = vim.api.nvim_win_get_width(view.sidebar.origin)
 
-      if window_width ~= Config.sidebar_width then
-        vim.api.nvim_win_set_width(view.sidebar.origin, Config.sidebar_width)
+      if window_width ~= Config.width then
+        vim.api.nvim_win_set_width(view.sidebar.origin, Config.width)
       end
     end,
   })
@@ -1505,7 +1494,7 @@ do
 
       local window_id = buf_winid(args.buf)
       local window_width = vim.api.nvim_win_get_width(window_id)
-      local is_sidebar = window_width == Config.sidebar_width
+      local is_sidebar = window_width == Config.width
 
       view.activate({ path = args.file })
       view.execute(function(ctx) ctx.view:show() end)
@@ -1537,3 +1526,5 @@ do
     vim.api.nvim_set_hl(0, group, val)
   end
 end
+
+return M
