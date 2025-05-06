@@ -1674,9 +1674,6 @@ function explorer.close_parent()
 end
 
 do
-  local argv = vim.fn.argv()
-  local open = argv[1] and vim.fn.fnamemodify(argv[1], ':p') or vim.loop.cwd()
-
   watcher.on('carbon:synchronize', function(_, path) view.resync(path) end)
 
   for name, command in pairs({
@@ -1734,10 +1731,6 @@ do
   }) do
     val.default = true
     vim.api.nvim_set_hl(0, group, val)
-  end
-
-  if vim.fn.has('vim_starting') and util.is_directory(open) then
-    view.activate({ path = open })
   end
 end
 
