@@ -458,7 +458,7 @@ local function create_leave(ctx)
   vim.api.nvim_clear_autocmds({
     buffer = 0,
     event = 'CursorMovedI',
-    augroup = constants.augroup,
+    group = constants.augroup,
   })
 
   ctx.view:update()
@@ -1126,7 +1126,6 @@ function view:create()
 
   vim.api.nvim_create_autocmd('CursorMovedI', {
     buffer = 0,
-    pattern = '*',
     group = constants.augroup,
     callback = create_insert_move(ctx),
   })
