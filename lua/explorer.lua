@@ -552,9 +552,7 @@ function view.activate(options_param)
     or view.current()
     or view.get(vim.loop.cwd())
 
-  if options.reveal then
-    current_view:expand_to_path(vim.fn.expand('%'))
-  end
+  current_view:expand_to_path(vim.fn.expand('%'))
 
   if options.sidebar then
     if vim.api.nvim_win_is_valid(view.sidebar.origin) then
