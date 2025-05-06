@@ -1,4 +1,4 @@
-local explorer = {}
+local view = {}
 
 local constants = {
   hl = vim.api.nvim_create_namespace('carbon'),
@@ -6,8 +6,6 @@ local constants = {
   augroup = vim.api.nvim_create_augroup('carbon', { clear = false }),
   directions = { left = 'h', right = 'l', up = 'k', down = 'j' },
 }
-
--------------------------------------------------------------------------------
 
 ---@class explorer.Opts
 local Config = {
@@ -17,22 +15,6 @@ local Config = {
   indicators = {
     expand = '+',
     collapse = '-',
-  },
-  actions = {
-    up = '[',
-    down = ']',
-    quit = 'q',
-    tabe = '<c-t>',
-    edit = '<cr>',
-    move = 'm',
-    reset = 'u',
-    split = { '<c-x>', '<c-s>' },
-    vsplit = '<c-v>',
-    create = { 'c', '%' },
-    delete = 'd',
-    close_parent = '-',
-    toggle_hidden = '*',
-    toggle_recursive = '!',
   },
 }
 
@@ -96,6 +78,181 @@ local function buf_create(name)
   vim.api.nvim_buf_set_name(buf, name)
 
   return buf
+end
+
+local function toggle_hidden()
+  view.execute(function(ctx)
+    ctx.view.show_hidden = not ctx.view.show_hidden
+
+    ctx.view:update()
+    ctx.view:render()
+  end)
+end
+
+local function action_toggle_recursive()
+  view.execute(function(ctx)
+    if ctx.cursor.line.entry.is_directory then
+      local function _toggle_recursive(target, value)
+        if target.is_directory then
+          ctx.view:set_path_attr(target.path, 'open', value)
+
+          if target:has_children() then
+            for _, child in ipairs(target:children()) do
+              _toggle_recursive(child, value)
+            end
+          end
+        end
+      end
+
+      _toggle_recursive(
+        ctx.cursor.line.entry,
+        not ctx.view:get_path_attr(ctx.cursor.line.entry.path, 'open')
+      )
+
+      ctx.view:update()
+      ctx.view:render()
+    end
+  end)
+end
+
+local function action_tabedit()
+  view.execute(function(ctx)
+    view.handle_sidebar()
+    vim.cmd.tabedit({
+      vim.fn.fnameescape(ctx.cursor.line.entry.path),
+      mods = { keepalt = #vim.fn.getreg('#') ~= 0 },
+    })
+  end)
+end
+
+---@param cmd "split" | "vsplit" | nil
+local function action_edit(cmd)
+  view.execute(function(ctx)
+    if ctx.cursor.line.entry.is_directory then
+      local open = ctx.view:get_path_attr(ctx.cursor.line.entry.path, 'open')
+
+      ctx.view:set_path_attr(ctx.cursor.line.entry.path, 'open', not open)
+      ctx.view:update()
+      ctx.view:render()
+      return
+    end
+
+    view.handle_sidebar()
+    vim.cmd({
+      cmd = cmd or 'edit',
+      args = { vim.fn.fnameescape(ctx.cursor.line.entry.path) },
+      mods = { keepalt = #vim.fn.getreg('#') ~= 0 },
+    })
+  end)
+end
+
+---@param action "up" | "down" | "reset"
+local function action_on_view(action)
+  view.execute(function(ctx)
+    local ok
+
+    if action == 'up' then
+      ok = ctx.view:up()
+    elseif action == 'down' then
+      ok = ctx.view:down()
+    else
+      ok = ctx.view:reset()
+    end
+
+    if ok then
+      ctx.view:update()
+      ctx.view:render()
+      set_cursor(1, 1)
+    end
+  end)
+end
+
+---@param action "create" | "delete" | "move"
+local function action_on_entry(action)
+  view.execute(function(ctx)
+    if action == 'create' then
+      ctx.view:create()
+    elseif action == 'delete' then
+      ctx.view:delete()
+    else
+      ctx.view:move()
+    end
+  end)
+end
+
+local function action_quit()
+  if #vim.api.nvim_list_wins() > 1 then
+    vim.api.nvim_win_close(0, true)
+  elseif #vim.api.nvim_list_bufs() > 1 then
+    pcall(vim.cmd.bprevious)
+  end
+end
+
+local function action_close_parent()
+  view.execute(function(ctx)
+    local count = 0
+    local lines = { unpack(ctx.view:current_lines(), 2) }
+    local entry_ = ctx.cursor.line.entry
+    local line
+
+    while count < vim.v.count1 do
+      line = vim.iter(lines):find(
+        function(current)
+          return current.entry == entry_.parent or vim.tbl_contains(current.path, entry_.parent)
+        end
+      )
+
+      if line then
+        count = count + 1
+        entry_ = line.path[1] and line.path[1].parent or line.entry
+
+        ctx.view:set_path_attr(entry_.path, 'open', false)
+      else
+        break
+      end
+    end
+
+    line = vim.iter(lines):find(
+      function(current) return current.entry == entry_ or vim.tbl_contains(current.path, entry_) end
+    )
+
+    if line then
+      vim.fn.cursor(line.lnum, (line.depth + 1) * 2 + 1)
+    end
+
+    ctx.view:update()
+    ctx.view:render()
+  end)
+end
+
+local function buf_init_mappings(buf)
+  --- @nodoc
+  --- @class explorer.Action
+  --- @field key string
+  --- @field fn function
+  ---
+  --- @type table<string, explorer.Action>
+  local actions = {
+    close_parent = { key = '-', fn = action_close_parent },
+    create = { key = 'c', fn = function() action_on_entry('create') end },
+    delete = { key = 'd', fn = function() action_on_entry('delete') end },
+    down = { key = ']', fn = function() action_on_view('down') end },
+    edit = { key = '<cr>', fn = action_edit },
+    move = { key = 'm', fn = function() action_on_entry('move') end },
+    quit = { key = 'q', fn = action_quit },
+    reset = { key = 'u', fn = function() action_on_view('reset') end },
+    split = { key = 's', fn = function() action_edit('split') end },
+    tabedit = { key = 't', fn = action_tabedit },
+    toggle_hidden = { key = 'gh', fn = toggle_hidden },
+    toggle_recursive = { key = '!', fn = action_toggle_recursive },
+    up = { key = '[', fn = function() action_on_view('up') end },
+    vsplit = { key = 'v', fn = function() action_edit('vsplit') end },
+  }
+
+  for name, action in pairs(actions) do
+    vim.keymap.set('', plug(name), action.fn, { buffer = buf, nowait = true })
+    vim.keymap.set('n', action.key, plug(name), { buffer = buf, nowait = true })
+  end
 end
 
 local function extmarks_clear(buf, ...)
@@ -387,8 +544,6 @@ function entry:highlight_group()
 end
 
 -------------------------------------------------------------------------------
-
-local view = {}
 
 view.__index = view
 view.sidebar = { origin = -1, target = -1 }
@@ -758,19 +913,7 @@ function view:buffer()
   end
 
   local buf = buf_create(self.root.path)
-
-  for action, mapping in pairs(Config.actions or {}) do
-    if type(mapping) == 'string' then
-      mapping = { mapping }
-    end
-
-    if type(mapping) == 'table' then
-      for _, key in ipairs(mapping) do
-        vim.keymap.set('', plug(action), explorer[action], { buffer = buf, nowait = true })
-        vim.keymap.set('n', key, plug(action), { buffer = buf, nowait = true })
-      end
-    end
-  end
+  buf_init_mappings(buf)
 
   for event, cb in pairs({
     BufHidden = function() self:hide() end,
@@ -1239,10 +1382,12 @@ end
 
 -------------------------------------------------------------------------------
 
+local M = {}
+
 ---@param opts explorer.Opts? When omitted or `nil`, retrieve the current
 ---       configuration. Otherwise, a configuration table (see |pack.Opts|).
 ---@return explorer.Opts? : Current pack config if {opts} is omitted.
-function explorer.config(opts)
+function M.config(opts)
   vim.validate('opts', opts, 'table', true)
 
   if not opts then
@@ -1252,151 +1397,7 @@ function explorer.config(opts)
   Config = vim.tbl_extend('force', Config, opts)
 end
 
-function explorer.toggle_hidden()
-  view.execute(function(ctx)
-    ctx.view.show_hidden = not ctx.view.show_hidden
-
-    ctx.view:update()
-    ctx.view:render()
-  end)
-end
-
-function explorer.toggle_recursive()
-  view.execute(function(ctx)
-    if ctx.cursor.line.entry.is_directory then
-      local function toggle_recursive(target, value)
-        if target.is_directory then
-          ctx.view:set_path_attr(target.path, 'open', value)
-
-          if target:has_children() then
-            for _, child in ipairs(target:children()) do
-              toggle_recursive(child, value)
-            end
-          end
-        end
-      end
-
-      toggle_recursive(
-        ctx.cursor.line.entry,
-        not ctx.view:get_path_attr(ctx.cursor.line.entry.path, 'open')
-      )
-
-      ctx.view:update()
-      ctx.view:render()
-    end
-  end)
-end
-
-function explorer.tabe()
-  view.execute(function(ctx)
-    view.handle_sidebar()
-    vim.cmd.tabedit({
-      vim.fn.fnameescape(ctx.cursor.line.entry.path),
-      mods = { keepalt = #vim.fn.getreg('#') ~= 0 },
-    })
-  end)
-end
-
-function explorer.edit()
-  view.execute(function(ctx)
-    if ctx.cursor.line.entry.is_directory then
-      local open = ctx.view:get_path_attr(ctx.cursor.line.entry.path, 'open')
-
-      ctx.view:set_path_attr(ctx.cursor.line.entry.path, 'open', not open)
-      ctx.view:update()
-      ctx.view:render()
-    else
-      view.handle_sidebar()
-      vim.cmd.edit({
-        vim.fn.fnameescape(ctx.cursor.line.entry.path),
-        mods = { keepalt = #vim.fn.getreg('#') ~= 0 },
-      })
-    end
-  end)
-end
-
-function explorer.split()
-  view.execute(function(ctx)
-    if not ctx.cursor.line.entry.is_directory then
-      if vim.w.carbon_fexplore_window then
-        vim.api.nvim_win_close(0, true)
-      end
-
-      view.handle_sidebar()
-      vim.cmd.split(vim.fn.fnameescape(ctx.cursor.line.entry.path))
-    end
-  end)
-end
-
-function explorer.vsplit()
-  view.execute(function(ctx)
-    if not ctx.cursor.line.entry.is_directory then
-      if vim.w.carbon_fexplore_window then
-        vim.api.nvim_win_close(0, true)
-      end
-
-      view.handle_sidebar()
-      vim.cmd.vsplit(vim.fn.fnameescape(ctx.cursor.line.entry.path))
-    end
-  end)
-end
-
-function explorer.up()
-  view.execute(function(ctx)
-    if ctx.view:up() then
-      ctx.view:update()
-      ctx.view:render()
-      set_cursor(1, 1)
-    end
-  end)
-end
-
-function explorer.reset()
-  view.execute(function(ctx)
-    if ctx.view:reset() then
-      ctx.view:update()
-      ctx.view:render()
-      set_cursor(1, 1)
-    end
-  end)
-end
-
-function explorer.down()
-  view.execute(function(ctx)
-    if ctx.view:down() then
-      ctx.view:update()
-      ctx.view:render()
-      set_cursor(1, 1)
-    end
-  end)
-end
-
-function explorer.explore(opts)
-  opts = opts or {}
-
-  local path = opts.fargs and opts.fargs[1] or vim.uv.cwd() --[[@as string]]
-  path = vim.fs.normalize(path)
-
-  view.activate({ path = path, reveal = opts.bang })
-end
-
-function explorer.toggle_sidebar(options)
-  local current_win = vim.api.nvim_get_current_win()
-
-  if vim.api.nvim_win_is_valid(view.sidebar.origin) then
-    vim.api.nvim_win_close(view.sidebar.origin, true)
-  else
-    local explore_options = vim.tbl_extend('force', options or {}, { sidebar = 'left' })
-
-    explorer.explore_sidebar(explore_options)
-
-    if not Config.sidebar_toggle_focus then
-      vim.api.nvim_set_current_win(current_win)
-    end
-  end
-end
-
-function explorer.explore_sidebar(opts)
+local function explore_sidebar(opts)
   opts = opts or {}
   local sidebar = opts.sidebar or 'left'
   local path = opts.fargs and opts.fargs[1] or vim.uv.cwd() --[[@as string]]
@@ -1405,94 +1406,47 @@ function explorer.explore_sidebar(opts)
   view.activate({ path = path, reveal = opts.bang, sidebar = sidebar })
 end
 
-function explorer.explore_left(options_param)
-  if view.sidebar.position ~= 'left' then
-    view.close_sidebar()
-  end
-
-  explorer.explore_sidebar(vim.tbl_extend('force', options_param or {}, { sidebar = 'left' }))
-end
-
-function explorer.explore_right(options_param)
-  if view.sidebar.position ~= 'right' then
-    view.close_sidebar()
-  end
-
-  explorer.explore_sidebar(vim.tbl_extend('force', options_param or {}, { sidebar = 'right' }))
-end
-
-function explorer.quit()
-  if #vim.api.nvim_list_wins() > 1 then
-    vim.api.nvim_win_close(0, true)
-  elseif #vim.api.nvim_list_bufs() > 1 then
-    pcall(vim.cmd.bprevious)
-  end
-end
-
-function explorer.create()
-  view.execute(function(ctx) ctx.view:create() end)
-end
-
-function explorer.delete()
-  view.execute(function(ctx) ctx.view:delete() end)
-end
-
-function explorer.move()
-  view.execute(function(ctx) ctx.view:move() end)
-end
-
-function explorer.close_parent()
-  view.execute(function(ctx)
-    local count = 0
-    local lines = { unpack(ctx.view:current_lines(), 2) }
-    local entry_ = ctx.cursor.line.entry
-    local line
-
-    while count < vim.v.count1 do
-      line = vim.iter(lines):find(
-        function(current)
-          return current.entry == entry_.parent or vim.tbl_contains(current.path, entry_.parent)
-        end
-      )
-
-      if line then
-        count = count + 1
-        entry_ = line.path[1] and line.path[1].parent or line.entry
-
-        ctx.view:set_path_attr(entry_.path, 'open', false)
-      else
-        break
-      end
-    end
-
-    line = vim.iter(lines):find(
-      function(current) return current.entry == entry_ or vim.tbl_contains(current.path, entry_) end
-    )
-
-    if line then
-      vim.fn.cursor(line.lnum, (line.depth + 1) * 2 + 1)
-    end
-
-    ctx.view:update()
-    ctx.view:render()
-  end)
-end
-
 do
   watcher.on('carbon:synchronize', function(_, path) view.resync(path) end)
 
-  for name, command in pairs({
-    ['Carbon'] = explorer.explore,
-    ['Rcarbon'] = explorer.explore_right,
-    ['Lcarbon'] = explorer.explore_left,
-    ['ToggleSidebarCarbon'] = explorer.toggle_sidebar,
-  }) do
-    vim.api.nvim_create_user_command(name, command, {
-      bang = true,
-      nargs = '?',
-      complete = 'dir',
-    })
-  end
+  vim.api.nvim_create_user_command('Carbon', function(opts)
+    opts = opts or {}
+
+    local path = opts.fargs and opts.fargs[1] or vim.uv.cwd() --[[@as string]]
+    path = vim.fs.normalize(path)
+
+    view.activate({ path = path, reveal = opts.bang })
+  end, { bang = true, nargs = '?', complete = 'dir' })
+
+  vim.api.nvim_create_user_command('Lcarbon', function(opts)
+    if view.sidebar.position ~= 'left' then
+      view.close_sidebar()
+    end
+    explore_sidebar(vim.tbl_extend('force', opts or {}, { sidebar = 'left' }))
+  end, { bang = true, nargs = '?', complete = 'dir' })
+
+  vim.api.nvim_create_user_command('Rcarbon', function(opts)
+    if view.sidebar.position ~= 'right' then
+      view.close_sidebar()
+    end
+    explore_sidebar(vim.tbl_extend('force', opts or {}, { sidebar = 'right' }))
+  end, { bang = true, nargs = '?', complete = 'dir' })
+
+  vim.api.nvim_create_user_command('ToggleSidebarCarbon', function(opts)
+    local current_win = vim.api.nvim_get_current_win()
+
+    if vim.api.nvim_win_is_valid(view.sidebar.origin) then
+      vim.api.nvim_win_close(view.sidebar.origin, true)
+    else
+      local explore_options = vim.tbl_extend('force', opts or {}, { sidebar = 'left' })
+
+      explore_sidebar(explore_options)
+
+      if not Config.sidebar_toggle_focus then
+        vim.api.nvim_set_current_win(current_win)
+      end
+    end
+  end, { bang = true, nargs = '?', complete = 'dir' })
 
   vim.api.nvim_create_autocmd('BufWinEnter', {
     pattern = '*',
