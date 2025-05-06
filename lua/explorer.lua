@@ -1629,17 +1629,6 @@ do
     })
   end
 
-  -- Remove Netrw
-  vim.g.loaded_netrw = 1
-  vim.g.loaded_netrwPlugin = 1
-
-  pcall(vim.api.nvim_del_augroup_by_name, 'FileExplorer')
-  pcall(vim.api.nvim_del_augroup_by_name, 'Network')
-
-  for action in pairs(Config.actions) do
-    vim.keymap.set('', plug(action), explorer[action])
-  end
-
   for group, val in pairs({
     CarbonDir = { link = 'Directory' },
     CarbonFile = { link = 'Text' },
